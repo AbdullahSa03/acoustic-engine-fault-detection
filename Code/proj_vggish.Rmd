@@ -1,0 +1,543 @@
+---
+---
+---
+
+------------------------------------------------------------------------
+
+------------------------------------------------------------------------
+
+```{r}
+
+setwd("C:/Users/eryou/Desktop/STA401/Project")
+
+train_data = read.csv("train_vggish_embeddings.csv")
+train_data$label = factor(train_data$label)
+
+train_data = train_data[-1]
+
+test_data = read.csv("test_vggish_embeddings.csv")
+test_data$label = factor(test_data$label)
+
+test_data = test_data[-1]
+test_data = test_data[-ncol(test_data)]
+
+```
+
+```{r}
+library(ggplot2)
+ggplot(train_data, aes(x = factor(label))) +
+  geom_bar(fill = "steelblue") +
+  geom_text(stat = "count", aes(label = ..count..), vjust = -0.5) +
+  labs(title = "Train Class Distribution",
+       x = "Class",
+       y = "Count") +
+  theme_minimal()
+```
+
+```{r}
+library(caret)
+nearzv<-nearZeroVar(train_data,saveMetrics = T)
+train_data<-train_data[,nearzv$nzv==F] # removing near zero variance variables
+test_data <-test_data[,names(train_data)] #
+```
+
+```{r}
+pca_result <- prcomp(train_data[, c(-ncol(train_data))], scale. = T)
+library(ggbiplot)
+p1 = ggscreeplot(pca_result)
+p2 = ggbiplot(pca_result, groups=train_data$label, scale=0, var.axes = F)
+
+print(p1)
+
+print(p2)
+```
+
+```{r}
+# kaiser rule
+eigenvalues = pca_result$sdev^2
+
+num_components_kaiser <- sum(eigenvalues > 1)
+print(num_components_kaiser)
+```
+
+```{r}
+library(factoextra)
+
+# Assuming pca_result is your prcomp() output
+fviz_eig(pca_result, addlabels = TRUE, ncp = 40) 
+```
+
+```{r}
+pca_var <- pca_result$sdev^2
+explained_var <- pca_var / sum(pca_var)
+
+# Create index
+x <- 1:length(explained_var)
+y <- explained_var
+
+# Line from first to last point
+line <- approxfun(c(x[1], x[length(x)]), c(y[1], y[length(y)]))
+
+# Distance from each point to the line
+distances <- abs((y - line(x)))
+
+# Knee is where distance is max
+knee_index <- which.max(distances)
+
+cat("Elbow/knee at component:", knee_index)
+```
+
+```{r}
+
+eigenvalues = pca_result$sdev^2
+
+variance_explained <- eigenvalues / sum(eigenvalues)
+cumulative_variance <- cumsum(variance_explained)
+print(cumulative_variance[knee_index-1])
+
+```
+
+```{r}
+var_explained <- cumsum(pca_result$sdev^2 / sum(pca_result$sdev^2))
+num_components <- which(var_explained >= 0.95)[1] 
+num_components
+```
+
+```{r}
+train_pca <- pca_result$x[, 1:num_components]
+train_pca_df <- as.data.frame(train_pca)
+train_pca_df$label <- train_data$label
+
+test_pca <- predict(pca_result, test_data[, -ncol(test_data)])[, 1:num_components]
+test_pca_df <- as.data.frame(test_pca)
+test_pca_df$label <- test_data$label
+
+```
+
+```{r}
+library(randomForest)
+library(e1071)
+library(rpart)
+library(xgboost)
+library(MASS)
+library(nnet)
+
+```
+
+```{r}
+multinom_fit<-multinom(label~., data=train_pca_df)
+yhat.mult = predict(multinom_fit,newdata=test_pca_df, type="class")
+print("Logistic Reg Confusion Matrix:")
+table(yhat.mult,test_pca_df$label)
+
+mult_error_rate = mean(yhat.mult!=test_pca_df$label)
+print(paste("Logistic Reg Error Rate:", round(mult_error_rate, 4)))
+
+```
+
+```{r}
+library(caret)
+library(ggplot2)
+plot_confusion_matrix <- function(y_pred, y_true, class_labels = NULL, fill_color = "#009194") {
+  # Compute confusion matrix
+  cm <- confusionMatrix(factor(y_pred), factor(y_true), dnn = c("Prediction", "Actual"))
+  
+  # Convert to data frame for plotting
+  plt <- as.data.frame(cm$table)
+  plt$Prediction <- factor(plt$Prediction, levels = rev(levels(plt$Prediction)))
+  
+  # Set up axis labels
+  n_classes <- length(levels(factor(y_true)))
+  if (is.null(class_labels)) {
+    class_labels <- levels(factor(y_true))
+  }
+  
+  ggplot(plt, aes(Prediction, Actual, fill = Freq)) +
+    geom_tile(color = "grey90") +
+    geom_text(aes(label = Freq), size = 4) +
+    scale_fill_gradient(low = "white", high = fill_color) +
+    labs(x = "Actual", y = "Prediction", fill = "Count") +
+    scale_x_discrete(labels = class_labels) +
+    scale_y_discrete(labels = rev(class_labels)) +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1))
+}
+```
+
+```{r}
+plot_confusion_matrix(yhat.mult, test_pca_df$label)
+```
+
+```{r}
+lda.fit=lda(label~.,data=train_pca_df)
+lda.pred=predict(lda.fit, test_pca_df)
+lda.class=lda.pred$class
+print("LDA Confusion Matrix:")
+table(lda.class,test_pca_df$label)
+lda_err_rate = mean(lda.class!=test_pca_df$label) #misclassification rate
+```
+
+```{r}
+plot_confusion_matrix(lda.class,test_pca_df$label)
+```
+
+```{r}
+qda.fit=qda(label~.,data=train_pca_df)
+qda.pred=predict(qda.fit, test_pca_df)
+qda.class=qda.pred$class
+print("QDA Confusion Matrix:")
+table(qda.class,test_pca_df$label)
+qda_err_rate = mean(qda.class!=test_pca_df$label)
+```
+
+```{r}
+plot_confusion_matrix(qda.class,test_pca_df$label)
+```
+
+```{r}
+bag.model=randomForest(label~.,data=train_pca_df,mtry=knee_index-1,importance=TRUE)
+yhat.bag = predict(bag.model,newdata=test_pca_df, type="class")
+print("Bagging Confusion Matrix:")
+table(yhat.bag,test_pca_df$label)
+
+bag_error_rate = mean(yhat.bag!=test_pca_df$label)
+print(paste("Bagging Error Rate:", round(bag_error_rate, 4)))
+plot_confusion_matrix(yhat.bag, test_pca_df$label)
+```
+
+```{r}
+varImpPlot(bag.model)
+```
+
+```{r}
+# Set up cross-validation
+set.seed(123)
+# Define the range of mtry values to try
+mtry_values <- seq(from = 2, to = ncol(train_pca_df) - 1, by = 10)
+
+# Create a control object for cross-validation
+control <- trainControl(method = "cv", number = 5, classProbs = TRUE, allowParallel = FALSE)
+
+# Set up the tuning grid
+tuneGrid <- expand.grid(mtry = mtry_values)
+
+# Train the model with cross-validation
+rf_cv_model <- train(
+  label ~ .,
+  data = train_pca_df,
+  method = "rf",
+  metric = "Accuracy",
+  tuneGrid = tuneGrid,
+  trControl = control,
+  importance = TRUE,
+)
+
+# Print the results
+print(rf_cv_model)
+print(rf_cv_model$bestTune)
+plot(rf_cv_model)
+
+
+```
+
+```{r}
+# Train the final model with the best mtry value
+best_mtry <- rf_cv_model$bestTune$mtry
+rf.model <- randomForest(label ~ ., data = train_pca_df, mtry = best_mtry, importance = TRUE)
+
+# Predict on test data
+yhat.rf <- predict(rf.model, newdata = test_pca_df, type = "class")
+
+# Evaluate the model
+print("Random Forest Confusion Matrix:")
+conf_matrix <- table(yhat.rf, test_pca_df$label)
+print(conf_matrix)
+
+rf_error_rate <- mean(yhat.rf != test_pca_df$label)
+print(paste("Random Forest Error Rate:", round(rf_error_rate, 4)))
+
+# Plot variable importance
+varImpPlot(rf.model)
+```
+
+```{r}
+plot_confusion_matrix(yhat.rf, test_pca_df$label)
+```
+
+```{r}
+set.seed(123)
+
+# 5-fold CV setup
+ctrl <- trainControl(method = "cv", number = 5, allowParallel = FALSE)
+
+# Define a grid of C (cost) and sigma (gamma) values to search over
+tune_grid <- expand.grid(
+  C = c(0.1, 1, 10, 100),
+  sigma = c(0.01, 0.05, 0.1, 0.5)
+)
+
+# Train with cross-validation and tuning
+svm_cv_model <- train(
+  label ~ .,
+  data = train_pca_df,
+  method = "svmRadial",
+  trControl = ctrl,
+  tuneGrid = tune_grid
+)
+
+# View best model and results
+print(svm_cv_model)
+print(svm_cv_model$bestTune)
+
+# Predict on test set
+yhat.svm <- predict(svm_cv_model, newdata = test_pca_df)
+conf_matrix <- table(yhat.svm, test_pca_df$label)
+print("Tuned SVM Confusion Matrix:")
+print(conf_matrix)
+
+# Error rate
+svm_error_rate <- mean(yhat.svm != test_pca_df$label)
+print(paste("Tuned SVM Error Rate:", round(svm_error_rate, 4)))
+```
+
+```{r}
+plot_confusion_matrix(yhat.svm, test_pca_df$label)
+```
+
+```{r}
+plot(svm_cv_model)
+```
+
+```{r}
+set.seed(123)
+
+# 5-fold CV setup
+ctrl <- trainControl(method = "cv", number = 5, allowParallel = FALSE)
+
+# Define a grid of C (cost) and sigma (gamma) values to search over
+tune_grid <- expand.grid(
+  C = c(0.1, 1, 10, 100)
+)
+
+# Train with cross-validation and tuning
+lsvm_cv_model <- train(
+  label ~ .,
+  data = train_pca_df,
+  method = "svmLinear",
+  trControl = ctrl,
+  tuneGrid = tune_grid
+)
+
+# View best model and results
+print(lsvm_cv_model)
+print(lsvm_cv_model$bestTune)
+
+# Predict on test set
+yhat.lsvm <- predict(lsvm_cv_model, newdata = test_pca_df)
+conf_matrix <- table(yhat.lsvm, test_pca_df$label)
+print("Tuned Linear SVM Confusion Matrix:")
+print(conf_matrix)
+
+# Error rate
+lsvm_error_rate <- mean(yhat.lsvm != test_pca_df$label)
+print(paste("Tuned Linear SVM Error Rate:", round(lsvm_error_rate, 4)))
+```
+
+```{r}
+plot(lsvm_cv_model)
+```
+
+```{r}
+plot_confusion_matrix(yhat.lsvm, test_pca_df$label)
+```
+
+```{r}
+# Convert labels to numeric for XGBoost
+label_mapping <- as.integer(factor(train_pca_df$label)) - 1
+test_label_mapping <- as.integer(factor(test_pca_df$label)) - 1
+
+# Prepare matrices for XGBoost
+train_matrix <- as.matrix(train_pca_df[, -which(names(train_pca_df) == "label")])
+test_matrix <- as.matrix(test_pca_df[, -which(names(test_pca_df) == "label")])
+
+# Create DMatrix objects
+dtrain <- xgb.DMatrix(data = train_matrix, label = label_mapping)
+dtest <- xgb.DMatrix(data = test_matrix, label = test_label_mapping)
+
+# Set parameters
+params <- list(
+  objective = "multi:softmax",
+  num_class = length(unique(train_pca_df$label)),
+  eta = 0.3,
+  max_depth = 6,
+  subsample = 0.8,
+  colsample_bytree = 0.8
+)
+
+# Train XGBoost model
+xgb.model <- xgb.train(
+  params = params,
+  data = dtrain,
+  nrounds = 100,
+  watchlist = list(train = dtrain, test = dtest),
+  verbose = 0
+)
+
+# Make predictions
+yhat.xgb <- predict(xgb.model, dtest)
+# Convert numeric predictions back to original labels
+class_levels <- levels(factor(train_pca_df$label))
+yhat.xgb <- class_levels[yhat.xgb + 1]
+xgb_conf_matrix <- table(yhat.xgb, test_pca_df$label)
+print("XGBoost Confusion Matrix:")
+print(xgb_conf_matrix)
+xgb_error_rate <- mean(yhat.xgb != test_pca_df$label)
+print(paste("XGBoost Error Rate:", round(xgb_error_rate, 4)))
+
+```
+
+```{r}
+plot_confusion_matrix(yhat.xgb, test_pca_df$label)
+```
+
+```{r}
+dt.model <- rpart(label ~ ., data = train_pca_df, method = "class")
+yhat.dt <- predict(dt.model, newdata = test_pca_df, type = "class")
+dt_conf_matrix <- table(yhat.dt, test_pca_df$label)
+print("Decision Tree Confusion Matrix:")
+print(dt_conf_matrix)
+dt_error_rate <- mean(yhat.dt != test_pca_df$label)
+print(paste("Decision Tree Error Rate:", round(dt_error_rate, 4)))
+```
+
+```{r}
+plot_confusion_matrix(yhat.dt, test_pca_df$label)
+```
+
+```{r}
+library(rpart.plot)
+rpart.plot(dt.model)
+```
+
+```{r}
+plotcp(dt.model)
+cp=which.min(dt.model$cptable[,"CP"])
+cp_min=dt.model$cptable[cp,"CP"]
+prune.dt=prune(dt.model,cp=cp_min)
+rpart.plot(prune.dt)
+```
+
+```{r}
+tct <- trainControl(method="repeatedcv", allowParallel = FALSE)
+knn.pred <- train(label ~ ., data = train_pca_df, method = "knn", trControl = tct, preProcess = c("center","scale"),tuneLength = 15)
+plot(knn.pred)
+```
+
+```{r}
+yhat.knn <- predict(knn.pred, newdata = test_pca_df)
+# Confusion matrix
+conf_matrix <- table(Predicted = yhat.knn, Actual = test_pca_df$label)
+print("KNN Confusion Matrix:")
+print(conf_matrix)
+
+# Error rate
+knn_error_rate <- mean(yhat.knn != test_pca_df$label)
+print(paste("KNN Error Rate:", round(knn_error_rate, 4)))
+```
+
+```{r}
+knn.pred$bestTune
+```
+
+```{r}
+plot_confusion_matrix(yhat.knn, test_pca_df$label)
+```
+
+```{r}
+error_rates <- c(
+  "LDA" = lda_err_rate,
+  "QDA" = qda_err_rate,
+  "Multinomial Logistic" = mult_error_rate,
+  "Bagging" = bag_error_rate,
+  "Random Forest" = rf_error_rate,
+  "Radial SVM" = svm_error_rate,
+  "Linear SVM" = lsvm_error_rate,
+  "Decision Tree" = dt_error_rate,
+  "XGBoost" = xgb_error_rate,
+  "KNN" = knn_error_rate
+)
+
+accuracy_rates <- 1 - error_rates
+cat("Model Accuracies (%):\n")
+cat(paste(names(accuracy_rates), "=", round(accuracy_rates * 100, 2), "%"), sep = " | ")
+
+
+acc_df <- data.frame(
+  Model = names(accuracy_rates),
+  Accuracy = as.numeric(accuracy_rates)
+)
+
+# Identify max accuracy for highlighting
+acc_df$Highlight <- acc_df$Accuracy == max(acc_df$Accuracy)
+
+# Plot
+ggplot(acc_df, aes(x = reorder(Model, Accuracy), y = Accuracy, fill = Highlight)) +
+  geom_col(show.legend = FALSE) +
+  geom_text(aes(label = sprintf("%.2f%%", Accuracy * 100)), vjust = -0.5, size = 3.5) +
+  scale_fill_manual(values = c("TRUE" = "darkorange", "FALSE" = "steelblue")) +
+  labs(title = "Model Accuracy Comparison", x = "Model", y = "Accuracy") +
+  ylim(0, 1) +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+```{r}
+get_metrics <- function(pred, truth) {
+  cm <- confusionMatrix(factor(pred), factor(truth))
+  by_class <- cm$byClass
+  
+  # Handle multiclass metrics averaging
+  if (is.matrix(by_class)) {
+    precision <- mean(by_class[,"Precision"], na.rm = TRUE)
+    recall    <- mean(by_class[,"Recall"], na.rm = TRUE)
+    f1        <- mean(by_class[,"F1"], na.rm = TRUE)
+  } else {
+    precision <- by_class["Precision"]
+    recall    <- by_class["Recall"]
+    f1        <- by_class["F1"]
+  }
+  
+  return(c(Precision = precision, Recall = recall, F1 = f1))
+}
+```
+
+```{r}
+metrics_df <- data.frame(
+  Model = c("LDA", "QDA", "Multinomial Logistic", "Bagging", "Random Forest", "Radial SVM",
+            "Linear SVM", "Decision Tree", "XGBoost", "KNN"),
+  t(sapply(list(lda.class, qda.class, yhat.mult, yhat.bag, yhat.rf, yhat.svm,
+                yhat.lsvm, yhat.dt, yhat.xgb, yhat.knn),
+           get_metrics,
+           truth = test_pca_df$label))
+)
+
+# Round for neatness
+# metrics_df <- round(metrics_df, 3)
+print(metrics_df)
+```
+
+```{r}
+library(tidyr)
+
+# Reshape for plotting
+metrics_long <- pivot_longer(metrics_df, cols = -Model, names_to = "Metric", values_to = "Score")
+
+# Plot
+ggplot(metrics_long, aes(x = reorder(Model, Score), y = Score, fill = Metric)) +
+  geom_col(position = "dodge") +
+  facet_wrap(~ Metric, scales = "free_y") +
+  coord_flip() +
+  labs(title = "Model Performance Metrics", x = "Model", y = "Score") +
+  theme_minimal()
+
+```
