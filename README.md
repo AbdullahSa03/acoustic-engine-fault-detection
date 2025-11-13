@@ -22,6 +22,8 @@ The pipeline covers preprocessing, data augmentation, feature extraction, PCA tr
 **Sampling Rate:** 44.1 kHz  
 **Classes:** Good, Heavy Load, Broken  
 
+**⚠️ Note:** The dataset must be downloaded separately to run this project. You can download it here: [IDMT-ISA-Electric-Engine](https://zenodo.org/records/7551261)
+
 The dataset is split into:
 
 - **Training Set:** clean audio  
@@ -158,4 +160,3 @@ This project demonstrates that audio-based engine fault detection is highly effe
 Course: **STA 401 – Introduction to Data Mining**  
 Instructor: **Dr. Ayman Alzaatreh**  
 Semester: **Spring 2025**
-
